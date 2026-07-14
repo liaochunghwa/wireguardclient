@@ -1,17 +1,17 @@
-# Sample WireGuard client config
-# Copy to wg0.conf and fill in your actual keys
-# DO NOT commit wg0.conf to git!
+# WireGuard Client 設定範本
+# 複製為 wg0.conf 並填入實際金鑰
+# ⚠️ 不要將 wg0.conf 提交到 git！
 
 [Interface]
 PrivateKey = <YOUR_PRIVATE_KEY>
-Address = 10.8.0.x/24
+Address = 10.8.0.x/24          # x 為 Server 分配的 IP（不能和別人重複）
 DNS = 1.1.1.1
 MTU = 1420
-Table = off
 
 [Peer]
 PublicKey = <SERVER_PUBLIC_KEY>
 PresharedKey = <PRESHARED_KEY>
-AllowedIPs = 10.8.0.0/24
+AllowedIPs = 10.8.0.0/24       # 只路由 VPN 子網
 PersistentKeepalive = 25
-Endpoint = <SERVER_ENDPOINT>:51820
+Endpoint = <SERVER_IP>:51820    # 同 LAN 用內網 IP（如 192.168.50.148:51820）
+                                # 外網用域名（如 mushinah.ddns.net:51820）

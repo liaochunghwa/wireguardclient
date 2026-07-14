@@ -1,25 +1,26 @@
-# WireGuard Client (141 TrueNAS)
+# WireGuard Client
 
-WireGuard VPN client + Web UI 管理面板，運行在 TrueNAS (192.168.50.141)。
+WireGuard VPN client + Web UI 管理面板，部署在 TrueNAS / Ubuntu 主機上。
 
 ## 架構
 
 ```
 wireguard-client (linuxserver/wireguard)  ←  VPN tunnel UDP 51820
         ↕ shared volume /config
-wireguard-ui (Flask)                      ←  Web UI Port 5000
+wireguard-ui (Flask/Python)              ←  Web UI Port 5080
 ```
 
 - **wireguard-client**: WireGuard VPN 連線（host 網路，linuxserver/wireguard）
-- **wireguard-ui**: 視覺管理面板（Flask/Python，可匯入 .conf、重啟、監控）
+- **wireguard-ui**: 視覺管理面板（可匯入 .conf、編輯設定、重啟 WireGuard、監控連線）
 
 ## 功能
 
-- 匯入 WireGuard Server 傳來的 `.conf` 檔案（上傳或貼上）
-- 即時顯示 WireGuard 連線狀態（peer、handshake、流量）
-- 重啟 / 停止 WireGuard 介面
-- 下載目前設定檔
-- 密碼保護登入頁面
+- **匯入設定**：上傳或貼上 WireGuard Server 傳來的 `.conf` 檔案
+- **編輯設定**：直接在 Web UI 編輯 wg0.conf，儲存後自動重連
+- **連線狀態**：即時顯示 peer、handshake 時間、上下行流量
+- **重啟 / 停止**：一鍵重啟 WireGuard 介面
+- **下載設定**：下載目前 wg0.conf
+- **密碼登入**：保護管理介面
 
 ## 預設帳密
 
@@ -33,12 +34,55 @@ wireguard-ui (Flask)                      ←  Web UI Port 5000
 ## 部署
 
 ```bash
-# 在 141 上
 cd /mnt/hivet/docker/wireguard-client
 sudo docker compose up -d --build
 ```
 
-Web UI: `http://192.168.50.141:5000`
+Web UI: `http://<YOUR_IP>:5080`
+
+## Endpoint 設定注意事項
+
+WireGuard client 的 `Endpoint` 需要根據部署環境選擇：
+
+| 場景 | Endpoint 設定 |
+|------|--------------|
+| Client 與 Server 在**同一個 LAN** | 用 Server 的**內網 IP**，例如 `192.168.50.148:51820` |
+| Client 從**外網**連 Server | 用 Server 的**公網域名**，例如 `mushinah.ddns.net:51820` |
+
+### 為什麼不能在 LAN 內用公網域名？
+
+多數路由器不支援 **hairpin NAT**（從 LAN 連自己的 WAN IP 再轉回 LAN），會導致 WireGuard handshake 失敗。如果 Client 和 Server 在同一個網段，務必使用內網 IP。
+
+## Host 環境需求
+
+```bash
+# 確保 sysctl 已設定（wg-quick 需要）
+sudo sysctl -w net.ipv4.conf.all.src_valid_mark=1
+sudo sysctl -w net.ipv4.ip_forward=1
+
+# 永久生效
+echo "net.ipv4.conf.all.src_valid_mark=1" | sudo tee -a /etc/sysctl.conf
+echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
+```
+
+## wg0.conf 設定說明
+
+```ini
+[Interface]
+PrivateKey = <CLIENT_PRIVATE_KEY>
+Address = 10.8.0.x/24          # x 為 Server 分配的 IP（不能和別人重複）
+DNS = 1.1.1.1
+MTU = 1420
+
+[Peer]
+PublicKey = <SERVER_PUBLIC_KEY>
+PresharedKey = <PRESHARED_KEY>
+AllowedIPs = 10.8.0.0/24       # 只路由 VPN 子網，不要用 0.0.0.0/0
+PersistentKeepkeepalive = 25
+Endpoint = <SERVER_IP>:51820    # 同 LAN 用內網 IP，外網用域名
+```
+
+> ⚠️ `AllowedIPs` 建議設為 `10.8.0.0/24`（只路由 VPN 流量）。若設為 `0.0.0.0/0`（全部流量走 VPN），需要完整的路由配置，否則可能導致網路中斷。
 
 ## Files
 
@@ -54,19 +98,19 @@ Web UI: `http://192.168.50.141:5000`
 ├── coredns/
 │   └── Corefile
 ├── templates/
-│   ├── server.conf
-│   └── peer.conf
+│   ├── server.conf                 # Server 設定模板
+│   └── peer.conf                   # Peer 設定模板
 └── wg_confs/
-    └── wg0.conf.sample
+    └── wg0.conf.sample             # Client 設定範本
 ```
 
 ## Key Parameters
 
 | Parameter | Value |
 |-----------|-------|
-| Subnet | 10.8.0.0/24 |
+| VPN Subnet | 10.8.0.0/24 |
 | MTU | 1420 |
 | DNS | 1.1.1.1 |
 | WireGuard Port | 51820/udp |
-| Web UI Port | 5000 |
+| Web UI Port | 5080 |
 | TZ | Asia/Taipei |
