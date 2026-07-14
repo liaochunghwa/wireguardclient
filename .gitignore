@@ -4,6 +4,9 @@ wg_confs/*.conf.bak
 *.privatekey
 *.presharedkey
 
+# Environment
+.env
+
 # OS
 .DS_Store
 Thumbs.db

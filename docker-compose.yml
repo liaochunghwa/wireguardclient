@@ -9,12 +9,12 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     volumes:
-      - /mnt/hivet/docker/wireguard-client:/config
+      - ${DATA_DIR:-./data}:/config
     environment:
       - SERVERMODE=off
       - PUID=0
       - PGID=0
-      - TZ=Asia/Taipei
+      - TZ=${TZ:-Asia/Taipei}
     restart: unless-stopped
 
   wireguard-ui:
@@ -24,13 +24,13 @@ services:
     cap_add:
       - NET_ADMIN
     volumes:
-      - /mnt/hivet/docker/wireguard-client:/config
+      - ${DATA_DIR:-./data}:/config
     environment:
       - WG_CONF_DIR=/config/wg_confs
-      - ADMIN_USER=admin
-      - ADMIN_PASS=wireguard
-      - SECRET_KEY=wg-ui-141-2026
-      - WG_UI_PORT=5080
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASS=${ADMIN_PASS:-wireguard}
+      - SECRET_KEY=${SECRET_KEY:-wg-ui-2026}
+      - WG_UI_PORT=${WG_UI_PORT:-5080}
     depends_on:
       - wireguard-client
     restart: unless-stopped

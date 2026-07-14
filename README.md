@@ -29,12 +29,24 @@ wireguard-ui (Flask/Python)              ←  Web UI Port 5080
 | 帳號 | `admin` |
 | 密碼 | `wireguard` |
 
-可在 `docker-compose.yml` 的 `environment` 中修改 `ADMIN_USER` / `ADMIN_PASS`。
+可在 `docker-compose.yml` 的 `environment` 中修改，或透過 `.env` 檔案設定。
 
-## 部署
+## 部署（新機器）
 
 ```bash
-cd /mnt/hivet/docker/wireguard-client
+# 1. Clone repo
+git clone https://github.com/liaochunghwa/wireguardclient.git
+cd wireguardclient
+
+# 2. 建立 .env（複製範本並修改）
+cp .env.example .env
+# 修改 DATA_DIR、SECRET_KEY 等
+
+# 3. 建立 wg0.conf（從 Server 取得金鑰後填入）
+cp wg_confs/wg0.conf.sample wg_confs/wg0.conf
+# 編輯 wg0.conf 填入 PrivateKey、Address、Endpoint 等
+
+# 4. 啟動
 sudo docker compose up -d --build
 ```
 
@@ -88,6 +100,7 @@ Endpoint = <SERVER_IP>:51820    # 同 LAN 用內網 IP，外網用域名
 
 ```
 ├── docker-compose.yml              # 兩個 service 的 compose 設定
+├── .env.example                    # 環境變數範本（複製為 .env）
 ├── wireguard-ui/
 │   ├── app.py                      # Flask 主程式
 │   ├── Dockerfile
