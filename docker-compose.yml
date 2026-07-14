@@ -16,3 +16,21 @@ services:
       - PGID=0
       - TZ=Asia/Taipei
     restart: unless-stopped
+
+  wireguard-ui:
+    build: ./wireguard-ui
+    container_name: wireguard-ui
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - /mnt/hivet/docker/wireguard-client:/config
+    environment:
+      - WG_CONF_DIR=/config/wg_confs
+      - ADMIN_USER=admin
+      - ADMIN_PASS=wireguard
+      - SECRET_KEY=wg-ui-141-2026
+      - WG_UI_PORT=5080
+    depends_on:
+      - wireguard-client
+    restart: unless-stopped

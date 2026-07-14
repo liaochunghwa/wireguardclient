@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WireGuard Client 管理</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
+.container{max-width:960px;margin:0 auto;padding:16px}
+a{color:#60a5fa;text-decoration:none}
+a:hover{text-decoration:underline}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #1e293b;margin-bottom:20px}
+.topbar h1{font-size:1.3rem;color:#f1f5f9}
+.topbar .actions a{margin-left:12px;font-size:.85rem;padding:4px 10px;border-radius:4px;background:#1e293b;color:#94a3b8}
+.topbar .actions a:hover{background:#334155;color:#e2e8f0;text-decoration:none}
+.card{background:#1e293b;border-radius:8px;padding:20px;margin-bottom:16px;border:1px solid #334155}
+.card h2{font-size:1.05rem;margin-bottom:12px;color:#f1f5f9;display:flex;align-items:center;gap:8px}
+.status-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.status-dot.up{background:#22c55e}
+.status-dot.down{background:#ef4444}
+.badge{font-size:.7rem;padding:2px 8px;border-radius:10px;font-weight:600}
+.badge.up{background:#166534;color:#86efac}
+.badge.down{background:#991b1b;color:#fca5a5}
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th{text-align:left;padding:8px;color:#94a3b8;border-bottom:1px solid #334155;font-weight:500}
+td{padding:8px;border-bottom:1px solid #1e293b}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:none;border-radius:6px;font-size:.85rem;font-weight:500;cursor:pointer;transition:all .15s}
+.btn-primary{background:#3b82f6;color:#fff}
+.btn-primary:hover{background:#2563eb}
+.btn-success{background:#22c55e;color:#fff}
+.btn-success:hover{background:#16a34a}
+.btn-warning{background:#f59e0b;color:#000}
+.btn-warning:hover{background:#d97706}
+.btn-danger{background:#ef4444;color:#fff}
+.btn-danger:hover{background:#dc2626}
+.btn-sm{padding:5px 12px;font-size:.8rem}
+textarea,.file-input{width:100%;padding:10px;border-radius:6px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-family:monospace;font-size:.82rem}
+textarea{min-height:180px;resize:vertical}
+.file-input{padding:8px;background:#0f172a}
+pre{background:#0f172a;padding:12px;border-radius:6px;overflow-x:auto;font-size:.8rem;color:#94a3b8;border:1px solid #334155;max-height:300px;overflow-y:auto}
+.flash{padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:.85rem}
+.flash.success{background:#14532d;color:#86efac;border:1px solid #166534}
+.flash.error{background:#7f1d1d;color:#fca5a5;border:1px solid #991b1b}
+.tabs{display:flex;gap:0;margin-bottom:0}
+.tab{padding:8px 16px;background:#0f172a;color:#94a3b8;border:1px solid #334155;cursor:pointer;font-size:.85rem;transition:all .15s}
+.tab:first-child{border-radius:6px 0 0 0}
+.tab:last-child{border-radius:0 6px 0 0}
+.tab.active{background:#1e293b;color:#e2e8f0;border-bottom-color:#1e293b}
+.tab-content{display:none;border:1px solid #334155;border-top:none;border-radius:0 0 6px 6px;padding:16px;background:#1e293b}
+.tab-content.active{display:block}
+.form-row{display:flex;gap:10px;align-items:end;margin-top:10px}
+.form-row .btn{white-space:nowrap}
+.empty{text-align:center;color:#64748b;padding:30px;font-size:.9rem}
+.peer-card{background:#0f172a;border-radius:6px;padding:12px;margin-bottom:8px;border:1px solid #334155}
+.peer-card .key{font-family:monospace;font-size:.75rem;color:#64748b;word-break:break-all}
+.peer-card .info{display:flex;gap:16px;flex-wrap:wrap;font-size:.82rem;margin-top:6px}
+.peer-card .info span{color:#94a3b8}
+.peer-card .info .val{color:#e2e8f0}
+@media(max-width:600px){.form-row{flex-direction:column}.tabs{flex-direction:column}.tab{border-radius:0!important}}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="topbar">
+<h1><span class="status-dot {{ 'up' if iface_up else 'down' }}"></span> WireGuard Client</h1>
+<div class="actions">
+<a href="/download">&#11015; 下載設定</a>
+<a href="/logout">&#10148; 登出</a>
+</div>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% for cat, msg in messages %}
+<div class="flash {{ cat }}">{{ msg }}</div>
+{% endfor %}
+{% endwith %}
+
+<div class="card">
+<h2>連線狀態 <span class="badge {{ 'up' if iface_up else 'down' }}">{{ '運行中' if iface_up else '已停止' }}</span></h2>
+{% if peers %}
+{% for p in peers %}
+<div class="peer-card">
+<div style="display:flex;justify-content:space-between;align-items:center">
+<strong>Peer</strong>
+<span class="badge {{ 'up' if p.connected else 'down' }}">{{ '已連線' if p.connected else '未連線' }}</span>
+</div>
+<div class="key">{{ p.public_key }}</div>
+<div class="info">
+{% if p.endpoint %}<span>Endpoint: <span class="val">{{ p.endpoint }}</span></span>{% endif %}
+{% if p.allowed_ips %}<span>Allowed: <span class="val">{{ p.allowed_ips }}</span></span>{% endif %}
+{% if p.handshake %}<span>Handshake: <span class="val">{{ p.handshake }}</span></span>{% endif %}
+{% if p.rx %}<span>RX: <span class="val">{{ p.rx }}</span> / TX: <span class="val">{{ p.tx }}</span></span>{% endif %}
+</div>
+</div>
+{% endfor %}
+{% else %}
+<div class="peer">{{ '介面未啟動，無 Peer 資訊' if not iface_up else '無已連線的 Peer' }}</div>
+{% endif %}
+<div style="margin-top:10px;display:flex;gap:8px">
+<form method="post" action="/restart" style="display:inline"><button class="btn btn-success btn-sm" type="submit">&#9654; 重啟</button></form>
+<form method="post" action="/stop" style="display:inline"><button class="btn btn-danger btn-sm" type="submit">&#9632; 停止</button></form>
+</div>
+</div>
+
+<div class="card">
+<h2>匯入設定</h2>
+<div class="tabs">
+<div class="tab active" onclick="switchTab(0)">上傳 .conf 檔案</div>
+<div class="tab" onclick="switchTab(1)">貼上設定內容</div>
+</div>
+<div class="tab-content active" id="tab0">
+<form method="post" action="/import" enctype="multipart/form-data">
+<input type="file" name="conf_file" class="file-input" accept=".conf,.cfg">
+<div class="form-row">
+<label style="font-size:.8rem;color:#94a3b8">選擇 WireGuard Server 傳來的 .conf 檔案</label>
+<button class="btn btn-primary" type="submit">&#10010; 匯入檔案</button>
+</div>
+</form>
+</div>
+<div class="tab-content" id="tab1">
+<form method="post" action="/import">
+<textarea name="conf_text" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = ...&#10;DNS = ...&#10;&#10;[Peer]&#10;PublicKey = ...&#10;AllowedIPs = ...&#10;Endpoint = ..."></textarea>
+<div class="form-row">
+<button class="btn btn-primary" type="submit">&#10010; 匯入文字</button>
+</div>
+</form>
+</div>
+</div>
+
+<div class="card">
+<h2>目前設定檔 <a href="/download" style="font-size:.75rem;margin-left:auto">&#11015; 下載</a></h2>
+{% if conf %}
+<pre>{{ conf }}</pre>
+{% else %}
+<div class="empty">設定檔不存在，請匯入 WireGuard 設定</div>
+{% endif %}
+</div>
+
+<div class="card">
+<h2>WireGuard 原始狀態</h2>
+<pre>{{ status if status else '無資料' }}</pre>
+</div>
+
+</div>
+<script>
+function switchTab(n){document.querySelectorAll('.tab').forEach((t,i)=>{t.classList.toggle('active',i===n)});document.querySelectorAll('.tab-content').forEach((c,i)=>{c.classList.toggle('active',i===n)})}
+</script>
+</body>
+</html>
