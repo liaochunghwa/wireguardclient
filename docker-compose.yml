@@ -1,6 +1,6 @@
 services:
   wireguard-client:
-    image: linuxserver/wireguard:latest
+    build: ./wireguard-client
     container_name: wireguard-client
     network_mode: host
     cap_add:

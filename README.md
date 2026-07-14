@@ -10,7 +10,7 @@ wireguard-client (linuxserver/wireguard)  ←  VPN tunnel UDP 51820
 wireguard-ui (Flask/Python)              ←  Web UI Port 5080
 ```
 
-- **wireguard-client**: WireGuard VPN 連線（host 網路，linuxserver/wireguard）
+- **wireguard-client**: WireGuard VPN 連線（host 網路，基於 linuxserver/wireguard，含自訂 init script 等待 config 就緒）
 - **wireguard-ui**: 視覺管理面板（可匯入 .conf、編輯設定、重啟 WireGuard、監控連線）
 
 ## 功能
@@ -51,6 +51,8 @@ sudo docker compose up -d --build
 ```
 
 Web UI: `http://<YOUR_IP>:5080`
+
+> **Init Script**: `wireguard-client` 的 container 啟動時會自動等待 `wg0.conf` 就緒（最多 60 秒）。若先 `docker compose up -d --build` 再透過 Web UI 建立 config，container 會自動等待。若超過 60 秒仍無 config，需手動重啟：`docker restart wireguard-client`。
 
 ## Endpoint 設定注意事項
 
@@ -101,6 +103,10 @@ Endpoint = <SERVER_IP>:51820    # 同 LAN 用內網 IP，外網用域名
 ```
 ├── docker-compose.yml              # 兩個 service 的 compose 設定
 ├── .env.example                    # 環境變數範本（複製為 .env）
+├── wireguard-client/
+│   ├── Dockerfile                  # 基於 linuxserver/wireguard，含自訂 init script
+│   └── custom-cont-init.d/
+│       └── 10-wait-for-config.sh   # 啟動時等待 wg0.conf 就緒（最多 60s）
 ├── wireguard-ui/
 │   ├── app.py                      # Flask 主程式
 │   ├── Dockerfile
