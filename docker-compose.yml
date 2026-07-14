@@ -1,0 +1,18 @@
+services:
+  wireguard-client:
+    image: linuxserver/wireguard:latest
+    container_name: wireguard-client
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - /mnt/hivet/docker/wireguard-client:/config
+    environment:
+      - SERVERMODE=off
+      - PUID=0
+      - PGID=0
+      - TZ=Asia/Taipei
+    restart: unless-stopped

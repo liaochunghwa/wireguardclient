@@ -1,0 +1,9 @@
+# WireGuard keys and generated configs (SENSITIVE)
+wg_confs/*.conf
+wg_confs/*.conf.bak
+*.privatekey
+*.presharedkey
+
+# OS
+.DS_Store
+Thumbs.db
