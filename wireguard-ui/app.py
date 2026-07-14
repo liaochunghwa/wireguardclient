@@ -12,6 +12,12 @@ app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
 WG_CONF_DIR = os.environ.get('WG_CONF_DIR', '/config/wg_confs')
 WG_CONF_FILE = os.path.join(WG_CONF_DIR, 'wg0.conf')
+
+os.makedirs(WG_CONF_DIR, exist_ok=True)
+if os.path.islink('/etc/wireguard'):
+    os.unlink('/etc/wireguard')
+if not os.path.exists('/etc/wireguard'):
+    os.symlink(WG_CONF_DIR, '/etc/wireguard')
 ADMIN_USER = os.environ.get('ADMIN_USER', 'admin')
 ADMIN_PASS = os.environ.get('ADMIN_PASS', 'wireguard')
 
