@@ -126,6 +126,25 @@ def import_conf():
     flash('設定已匯入並重新啟動 WireGuard', 'success')
     return redirect(url_for('index'))
 
+@app.route('/save', methods=['POST'])
+@login_required
+def save_conf():
+    content = request.form.get('conf_content', '').strip()
+    if not content:
+        flash('設定內容不能為空', 'error')
+        return redirect(url_for('index'))
+    if '[Interface]' not in content:
+        flash('無效的 WireGuard 設定：缺少 [Interface] 區段', 'error')
+        return redirect(url_for('index'))
+    if os.path.exists(WG_CONF_FILE):
+        backup = WG_CONF_FILE + '.bak'
+        subprocess.run(f'cp {WG_CONF_FILE} {backup}', shell=True)
+    write_wg_conf(content)
+    run_cmd('wg-quick down wg0 2>/dev/null')
+    run_cmd('wg-quick up wg0')
+    flash('設定已儲存並重新連線 WireGuard', 'success')
+    return redirect(url_for('index'))
+
 @app.route('/restart', methods=['POST'])
 @login_required
 def restart():

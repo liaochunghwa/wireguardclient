@@ -131,7 +131,12 @@ pre{background:#0f172a;padding:12px;border-radius:6px;overflow-x:auto;font-size:
 <div class="card">
 <h2>目前設定檔 <a href="/download" style="font-size:.75rem;margin-left:auto">&#11015; 下載</a></h2>
 {% if conf %}
-<pre>{{ conf }}</pre>
+<form method="post" action="/save">
+<textarea name="conf_content" style="min-height:220px">{{ conf }}</textarea>
+<div class="form-row">
+<button class="btn btn-warning btn-sm" type="submit" onclick="return confirm('儲存後將重新連線 WireGuard，確定？')">&#128190; 儲存並重連</button>
+</div>
+</form>
 {% else %}
 <div class="empty">設定檔不存在，請匯入 WireGuard 設定</div>
 {% endif %}
