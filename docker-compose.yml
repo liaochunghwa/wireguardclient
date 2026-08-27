@@ -25,12 +25,14 @@ services:
       - NET_ADMIN
     volumes:
       - ${DATA_DIR:-./data}:/config
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - WG_CONF_DIR=/config/wg_confs
       - ADMIN_USER=${ADMIN_USER:-admin}
       - ADMIN_PASS=${ADMIN_PASS:-wireguard}
       - SECRET_KEY=${SECRET_KEY:-wg-ui-2026}
       - WG_UI_PORT=${WG_UI_PORT:-5080}
+      - WG_CLIENT_CONTAINER=wireguard-client
     depends_on:
       - wireguard-client
     restart: unless-stopped
