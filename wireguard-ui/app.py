@@ -4,7 +4,6 @@ import subprocess
 import secrets
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file, jsonify
-from werkzeug.utils import secure_filename
 import io
 
 app = Flask(__name__)
@@ -12,12 +11,10 @@ app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
 WG_CONF_DIR = os.environ.get('WG_CONF_DIR', '/config/wg_confs')
 WG_CONF_FILE = os.path.join(WG_CONF_DIR, 'wg0.conf')
+WG_CLIENT_CONTAINER = os.environ.get('WG_CLIENT_CONTAINER', 'wireguard-client')
 
 os.makedirs(WG_CONF_DIR, exist_ok=True)
-if os.path.islink('/etc/wireguard'):
-    os.unlink('/etc/wireguard')
-if not os.path.exists('/etc/wireguard'):
-    os.symlink(WG_CONF_DIR, '/etc/wireguard')
+
 ADMIN_USER = os.environ.get('ADMIN_USER', 'admin')
 ADMIN_PASS = os.environ.get('ADMIN_PASS', 'wireguard')
 
@@ -40,6 +37,21 @@ def write_wg_conf(content):
     os.makedirs(WG_CONF_DIR, exist_ok=True)
     with open(WG_CONF_FILE, 'w') as f:
         f.write(content)
+
+def restart_wireguard_client():
+    try:
+        import docker
+        client = docker.from_env()
+        container = client.containers.get(WG_CLIENT_CONTAINER)
+        container.restart(timeout=10)
+        return True, 'WireGuard client 已重啟'
+    except ImportError:
+        r = subprocess.run(f'docker restart {WG_CLIENT_CONTAINER}', shell=True, capture_output=True, text=True, timeout=30)
+        if r.returncode == 0:
+            return True, 'WireGuard client 已重啟'
+        return False, r.stderr
+    except Exception as e:
+        return False, str(e)
 
 def run_cmd(cmd, timeout=10):
     try:
@@ -103,11 +115,9 @@ def index():
 @app.route('/import', methods=['POST'])
 @login_required
 def import_conf():
-    # Method 1: file upload
     if 'conf_file' in request.files and request.files['conf_file'].filename:
         f = request.files['conf_file']
         content = f.read().decode('utf-8', errors='replace')
-    # Method 2: textarea paste
     elif request.form.get('conf_text', '').strip():
         content = request.form.get('conf_text').strip()
     else:
@@ -118,18 +128,17 @@ def import_conf():
         flash('無效的 WireGuard 設定：缺少 [Interface] 區段', 'error')
         return redirect(url_for('index'))
 
-    # Backup current config
     if os.path.exists(WG_CONF_FILE):
         backup = WG_CONF_FILE + '.bak'
         subprocess.run(f'cp {WG_CONF_FILE} {backup}', shell=True)
 
     write_wg_conf(content)
 
-    # Restart WireGuard
-    run_cmd('wg-quick down wg0 2>/dev/null')
-    result = run_cmd('wg-quick up wg0')
-
-    flash('設定已匯入並重新啟動 WireGuard', 'success')
+    ok, msg = restart_wireguard_client()
+    if ok:
+        flash('設定已匯入，WireGuard client 重啟中...', 'success')
+    else:
+        flash(f'設定已匯入，但重啟失敗：{msg}。請手動重啟 wireguard-client 容器', 'warning')
     return redirect(url_for('index'))
 
 @app.route('/save', methods=['POST'])
@@ -146,17 +155,22 @@ def save_conf():
         backup = WG_CONF_FILE + '.bak'
         subprocess.run(f'cp {WG_CONF_FILE} {backup}', shell=True)
     write_wg_conf(content)
-    run_cmd('wg-quick down wg0 2>/dev/null')
-    run_cmd('wg-quick up wg0')
-    flash('設定已儲存並重新連線 WireGuard', 'success')
+
+    ok, msg = restart_wireguard_client()
+    if ok:
+        flash('設定已儲存，WireGuard client 重啟中...', 'success')
+    else:
+        flash(f'設定已儲存，但重啟失敗：{msg}。請手動重啟 wireguard-client 容器', 'warning')
     return redirect(url_for('index'))
 
 @app.route('/restart', methods=['POST'])
 @login_required
 def restart():
-    run_cmd('wg-quick down wg0 2>/dev/null')
-    result = run_cmd('wg-quick up wg0')
-    flash(f'WireGuard 已重新啟動', 'success')
+    ok, msg = restart_wireguard_client()
+    if ok:
+        flash('WireGuard client 已重新啟動', 'success')
+    else:
+        flash(f'重啟失敗：{msg}', 'error')
     return redirect(url_for('index'))
 
 @app.route('/stop', methods=['POST'])
