@@ -98,6 +98,19 @@ Endpoint = <SERVER_IP>:51820    # 同 LAN 用內網 IP，外網用域名
 
 > ⚠️ `AllowedIPs` 建議設為 `10.8.0.0/24`（只路由 VPN 流量）。若設為 `0.0.0.0/0`（全部流量走 VPN），需要完整的路由配置，否則可能導致網路中斷。
 
+## 預設路由保險（netplan）
+
+若主機的 DHCP 只發 DNS 主機路由（例如 `1.1.1.1 / 8.8.8.8 via 閘道`）卻**沒有給 default route**，重開機後 WireGuard client 會連不上（DDNS endpoint 不可達、出現 `cannot resolve <DDNS>`）。用 `netplan/99-default-route.yaml` 強制訂死 default route：
+
+```bash
+# 依主機修改網卡名稱（ens3/eno1/eth0）與閘道後：
+sudo cp netplan/99-default-route.yaml /etc/netplan/
+sudo netplan apply
+ip route show | grep default   # 確認出現 default via <GATEWAY>
+```
+
+> 此檔設 `dhcp4-overrides.use-routes: false`，避免 DHCP 給的路由（沒有 default）蓋掉我們訂死的 default。
+
 ## Files
 
 ```
@@ -116,6 +129,8 @@ Endpoint = <SERVER_IP>:51820    # 同 LAN 用內網 IP，外網用域名
 │       └── login.html              # 登入頁
 ├── coredns/
 │   └── Corefile
+├── netplan/
+│   └── 99-default-route.yaml        # 訂死 default route（DHCP 沒給 default 時用）
 ├── templates/
 │   ├── server.conf                 # Server 設定模板
 │   └── peer.conf                   # Peer 設定模板

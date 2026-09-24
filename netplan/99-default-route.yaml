@@ -1,0 +1,26 @@
+# Ensure the host ALWAYS keeps a default route to its LAN gateway.
+#
+# Problem: this host's DHCP server hands out DNS host-routes (e.g.
+# 1.1.1.1/8.8.8.8 via gateway) but NO default route. After a reboot the
+# WireGuard client endpoint (DDNS) can therefore not be reached, the tunnel
+# never handshakes and "cannot resolve <ddns>" appears at container start.
+#
+# Fix: define the default route statically in netplan, independent of what
+# DHCP provides. Adjust the device name (`ens3`) and gateway (`192.168.2.1`)
+# to match each host, then:
+#
+#   sudo cp netplan/99-default-route.yaml /etc/netplan/
+#   sudo netplan apply
+#   ip route show | grep default        # must print: default via 192.168.2.1 dev ens3
+
+network:
+  version: 2
+  ethernets:
+    ens3:
+      dhcp4: true
+      dhcp4-overrides:
+        use-routes: false
+      routes:
+        - to: default
+          via: 192.168.2.1
+          on-link: true
