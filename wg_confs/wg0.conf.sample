@@ -5,8 +5,15 @@
 [Interface]
 PrivateKey = <YOUR_PRIVATE_KEY>
 Address = 10.8.0.x/24          # x 為 Server 分配的 IP（不能和別人重複）
+ListenPort = 52066             # ⚠️ 建議固定，不可隨機！見下方說明
 DNS = 1.1.1.1
 MTU = 1420
+
+# ListenPort 說明：
+# 若沒有指定，每次介面重建（如 docker restart wireguard-client）都會
+# 換一個隨機 listener port；Server 端學到的 endpoint 停在舊 port，
+# 新介面的 handshake 就再也完成不了（看起來「重啟後連不回來」）。
+# 固定一個 port（建議沿用 Server 已學到的 port）即可在重啟後立刻重連。
 
 [Peer]
 PublicKey = <SERVER_PUBLIC_KEY>

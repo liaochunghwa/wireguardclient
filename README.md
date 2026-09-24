@@ -85,6 +85,7 @@ echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
 [Interface]
 PrivateKey = <CLIENT_PRIVATE_KEY>
 Address = 10.8.0.x/24          # x 為 Server 分配的 IP（不能和別人重複）
+ListenPort = 52066            # ⚠️ 務必固定！見下方「重啟後連不回來」說明
 DNS = 1.1.1.1
 MTU = 1420
 
@@ -97,6 +98,10 @@ Endpoint = <SERVER_IP>:51820    # 同 LAN 用內網 IP，外網用域名
 ```
 
 > ⚠️ `AllowedIPs` 建議設為 `10.8.0.0/24`（只路由 VPN 流量）。若設為 `0.0.0.0/0`（全部流量走 VPN），需要完整的路由配置，否則可能導致網路中斷。
+
+### 重啟後連不回來（listen port 飄移）
+
+若 `[Interface]` **沒有指定 `ListenPort`**，每次 `docker restart wireguard-client`（介面重建）都會換隨機 listener port；Server 端學到的 endpoint 停在舊 port，新介面的 handshake 完成不了。**務必固定 `ListenPort`**（沿用 Server 已學到的 port，例 `52066`），重啟後立刻能重連。判斷方式：重啟後 `docker exec wireguard-client wg show` 若 `listening port` 每次都變 → 就是這個問題。
 
 ## 預設路由保險（netplan）
 
