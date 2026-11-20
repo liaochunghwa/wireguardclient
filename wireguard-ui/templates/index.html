@@ -114,14 +114,16 @@ pre{background:#0f172a;padding:12px;border-radius:6px;overflow-x:auto;font-size:
 <input type="file" name="conf_file" class="file-input" accept=".conf,.cfg">
 <div class="form-row">
 <label style="font-size:.8rem;color:#94a3b8">選擇 WireGuard Server 傳來的 .conf 檔案</label>
+<label style="font-size:.8rem;color:#94a3b8"><input type="checkbox" name="vpn_only" value="1"> 只路由 VPN 網段（AllowedIPs = 10.8.0.0/24，避免全流量走隧道）</label>
 <button class="btn btn-primary" type="submit">&#10010; 匯入檔案</button>
 </div>
 </form>
 </div>
 <div class="tab-content" id="tab1">
 <form method="post" action="/import">
-<textarea name="conf_text" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = ...&#10;DNS = ...&#10;&#10;[Peer]&#10;PublicKey = ...&#10;AllowedIPs = ...&#10;Endpoint = ..."></textarea>
+<textarea name="conf_text" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = ...&#10;DNS = ...&#10;&#10;[Peer]&#10;PublicKey = ...&#10;AllowedIPs = ...&#10;Endpoint = 192.168.50.148:51820"></textarea>
 <div class="form-row">
+<label style="font-size:.8rem;color:#94a3b8"><input type="checkbox" name="vpn_only" value="1"> 只路由 VPN 網段（AllowedIPs = 10.8.0.0/24）</label>
 <button class="btn btn-primary" type="submit">&#10010; 匯入文字</button>
 </div>
 </form>

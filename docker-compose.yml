@@ -6,15 +6,21 @@ services:
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
+      - SYS_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv4.ip_forward=1
     volumes:
       - ${DATA_DIR:-./data}:/config
     environment:
       - SERVERMODE=off
+      - USE_COREDNS=false
       - PUID=0
       - PGID=0
       - TZ=${TZ:-Asia/Taipei}
+      - WG_AUTO_UP_INTERVAL=${WG_AUTO_UP_INTERVAL:-15}
     restart: unless-stopped
 
   wireguard-ui:
@@ -33,6 +39,8 @@ services:
       - SECRET_KEY=${SECRET_KEY:-wg-ui-2026}
       - WG_UI_PORT=${WG_UI_PORT:-5080}
       - WG_CLIENT_CONTAINER=wireguard-client
+      - WG_LISTEN_PORT=${WG_LISTEN_PORT:-51821}
+      - WG_VPN_SUBNET=${WG_VPN_SUBNET:-10.8.0.0/24}
     depends_on:
       - wireguard-client
     restart: unless-stopped

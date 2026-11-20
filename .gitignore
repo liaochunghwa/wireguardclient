@@ -10,3 +10,10 @@ wg_confs/*.conf.bak
 # OS
 .DS_Store
 Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+
+# runtime data
+data/

@@ -1,0 +1,95 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+# Replacement for the stock linuxserver svc-wireguard service.
+#
+# The stock service only tries `wg-quick up` ONCE at container start and then
+# exits. If the conf is missing/invalid at that moment (e.g. it is imported
+# later through the Web UI), the wg0 interface is never created on the host.
+# It also runs `ip route del default` when no conf is found, which with
+# network_mode: host deletes the HOST's default route.
+#
+# This version:
+#   1. ensures required sysctls are set (best effort),
+#   2. brings up every valid .conf in /config/wg_confs,
+#   3. keeps running forever: re-applies a tunnel when its conf changes,
+#      and re-brings-up any tunnel whose interface disappeared.
+
+CONF_DIR="/config/wg_confs"
+STATE_DIR="/run/wg-state"
+ACTIVE_FILE="/run/activeconfs"
+INTERVAL="${WG_AUTO_UP_INTERVAL:-15}"
+
+log() {
+    echo "[wg-auto-up] $*"
+}
+
+conf_valid() {
+    grep -q '^\[Interface\]' "$1" && grep -q 'PrivateKey' "$1"
+}
+
+conf_hash() {
+    sha256sum "$1" | awk '{print $1}'
+}
+
+# wg-quick needs net.ipv4.conf.all.src_valid_mark=1 for routing. Try to set it
+# (needs CAP_SYS_ADMIN, hence SYS_ADMIN in docker-compose); if not permitted,
+# the host is expected to have it set already (deploy.sh / sysctl.conf).
+prepare_sysctls() {
+    sysctl -w net.ipv4.conf.all.src_valid_mark=1 2>/dev/null || \
+        log "could not set src_valid_mark from container; set it on the host"
+    sysctl -w net.ipv4.ip_forward=1 2>/dev/null || true
+}
+
+# /run/activeconfs is read by the stock svc-wireguard "down" script on
+# container stop, so keep it in the format it expects.
+WG_CONFS=()
+write_active_confs() {
+    declare -p WG_CONFS > "$ACTIVE_FILE"
+}
+
+up_tunnel() {
+    local conf="$1" iface
+    iface=$(basename "$conf" .conf)
+    log "bringing up interface ${iface} from ${conf}"
+    if wg-quick up "$conf"; then
+        conf_hash "$conf" > "${STATE_DIR}/${iface}.hash"
+        WG_CONFS+=("$conf")
+        write_active_confs
+        log "interface ${iface} is up"
+        return 0
+    fi
+    log "interface ${iface} failed to come up (will retry in ${INTERVAL}s)"
+    return 1
+}
+
+ensure_tunnels() {
+    local conf iface hash prev
+    for conf in "${CONF_DIR}"/*.conf; do
+        [ -f "$conf" ] || continue
+        if ! conf_valid "$conf"; then
+            log "skipping invalid conf: ${conf}"
+            continue
+        fi
+        iface=$(basename "$conf" .conf)
+        if ! wg show "$iface" >/dev/null 2>&1; then
+            up_tunnel "$conf"
+        else
+            hash=$(conf_hash "$conf")
+            prev=$(cat "${STATE_DIR}/${iface}.hash" 2>/dev/null)
+            if [ -n "$prev" ] && [ "$prev" != "$hash" ]; then
+                log "conf for ${iface} changed, re-applying"
+                wg-quick down "$conf" 2>/dev/null || true
+                up_tunnel "$conf"
+            fi
+        fi
+    done
+}
+
+mkdir -p "$STATE_DIR"
+prepare_sysctls
+log "watching ${CONF_DIR} (interval=${INTERVAL}s)"
+
+while true; do
+    ensure_tunnels
+    sleep "$INTERVAL"
+done

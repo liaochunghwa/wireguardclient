@@ -12,6 +12,8 @@ app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 WG_CONF_DIR = os.environ.get('WG_CONF_DIR', '/config/wg_confs')
 WG_CONF_FILE = os.path.join(WG_CONF_DIR, 'wg0.conf')
 WG_CLIENT_CONTAINER = os.environ.get('WG_CLIENT_CONTAINER', 'wireguard-client')
+WG_LISTEN_PORT = os.environ.get('WG_LISTEN_PORT', '51821')
+WG_VPN_SUBNET = os.environ.get('WG_VPN_SUBNET', '10.8.0.0/24')
 
 os.makedirs(WG_CONF_DIR, exist_ok=True)
 
@@ -52,6 +54,54 @@ def restart_wireguard_client():
         return False, r.stderr
     except Exception as e:
         return False, str(e)
+
+def validate_conf(content):
+    """Return a list of error messages for an imported conf (empty = valid)."""
+    errors = []
+    pk = re.search(r'^PrivateKey\s*=\s*(\S+)', content, re.M)
+    if not pk or not re.fullmatch(r'[0-9a-fA-F]{64}', pk.group(1)):
+        errors.append('PrivateKey 無效：需 64 字 hex（請貼上 wg-easy 實際匯出的 .conf，不要用範本）')
+    pub = re.search(r'^PublicKey\s*=\s*(\S+)', content, re.M)
+    if not pub or not re.fullmatch(r'[0-9a-fA-F]{64}', pub.group(1)):
+        errors.append('PublicKey 無效：需 64 字 hex')
+    if not re.search(r'^Endpoint\s*=\s*\S+', content, re.M):
+        errors.append('缺少 Endpoint（同 LAN 用 192.168.50.148:51820，外網用 DDNS 域名）')
+    return errors
+
+def normalize_conf(content, vpn_only=False):
+    """Fix common wg-easy export issues so wg-quick can bring up wg0 reliably."""
+    # wg-easy exports have no ListenPort -> random port drift after restarts
+    if not re.search(r'^ListenPort\s*=', content, re.M):
+        content = re.sub(
+            r'^(PrivateKey\s*=\s*\S+)',
+            lambda m: m.group(1) + f'\nListenPort = {WG_LISTEN_PORT}',
+            content, count=1, flags=re.M)
+    # wg-easy defaults to 0.0.0.0/0, ::/0 (all traffic through the tunnel),
+    # which can break the host's LAN/internet if the server does not forward.
+    if vpn_only:
+        content = re.sub(r'^AllowedIPs\s*=.*$', f'AllowedIPs = {WG_VPN_SUBNET}',
+                        content, flags=re.M)
+    if not re.search(r'^PersistentKeepalive\s*=', content, re.M):
+        content = re.sub(
+            r'^(Endpoint\s*=\s*\S+)',
+            lambda m: m.group(1) + '\nPersistentKeepalive = 25',
+            content, count=1, flags=re.M)
+    return content
+
+def apply_wireguard():
+    """Apply the new conf inside the client container (no full restart needed).
+    The in-container wg-auto-up watcher also picks up changes within ~15s."""
+    try:
+        import docker
+        client = docker.from_env()
+        container = client.containers.get(WG_CLIENT_CONTAINER)
+        r = container.exec_run(
+            ['bash', '-c', 'wg-quick down wg0 2>/dev/null; wg-quick up wg0'])
+        if r.exit_code == 0:
+            return True, '設定已套用，wg0 已重新連線'
+        return True, '設定已寫入，client 的 auto-up 服務將自動重試連線'
+    except Exception:
+        return True, '設定已寫入，client 的 auto-up 服務將自動套用（約 15 秒內）'
 
 def run_cmd(cmd, timeout=10):
     try:
@@ -128,17 +178,26 @@ def import_conf():
         flash('無效的 WireGuard 設定：缺少 [Interface] 區段', 'error')
         return redirect(url_for('index'))
 
+    errors = validate_conf(content)
+    if errors:
+        for e in errors:
+            flash(e, 'error')
+        return redirect(url_for('index'))
+
+    vpn_only = request.form.get('vpn_only') == '1'
+    content = normalize_conf(content, vpn_only=vpn_only)
+
     if os.path.exists(WG_CONF_FILE):
         backup = WG_CONF_FILE + '.bak'
         subprocess.run(f'cp {WG_CONF_FILE} {backup}', shell=True)
 
     write_wg_conf(content)
 
-    ok, msg = restart_wireguard_client()
+    ok, msg = apply_wireguard()
     if ok:
-        flash('設定已匯入，WireGuard client 重啟中...', 'success')
+        flash(msg, 'success')
     else:
-        flash(f'設定已匯入，但重啟失敗：{msg}。請手動重啟 wireguard-client 容器', 'warning')
+        flash(f'設定已匯入，但套用失敗：{msg}。請手動重啟 wireguard-client 容器', 'warning')
     return redirect(url_for('index'))
 
 @app.route('/save', methods=['POST'])
@@ -151,16 +210,21 @@ def save_conf():
     if '[Interface]' not in content:
         flash('無效的 WireGuard 設定：缺少 [Interface] 區段', 'error')
         return redirect(url_for('index'))
+    errors = validate_conf(content)
+    if errors:
+        for e in errors:
+            flash(e, 'error')
+        return redirect(url_for('index'))
     if os.path.exists(WG_CONF_FILE):
         backup = WG_CONF_FILE + '.bak'
         subprocess.run(f'cp {WG_CONF_FILE} {backup}', shell=True)
     write_wg_conf(content)
 
-    ok, msg = restart_wireguard_client()
+    ok, msg = apply_wireguard()
     if ok:
-        flash('設定已儲存，WireGuard client 重啟中...', 'success')
+        flash(msg, 'success')
     else:
-        flash(f'設定已儲存，但重啟失敗：{msg}。請手動重啟 wireguard-client 容器', 'warning')
+        flash(f'設定已儲存，但套用失敗：{msg}。請手動重啟 wireguard-client 容器', 'warning')
     return redirect(url_for('index'))
 
 @app.route('/restart', methods=['POST'])
