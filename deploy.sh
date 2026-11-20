@@ -42,6 +42,6 @@ docker compose up -d --build
 
 echo "==> Done."
 echo "    Web UI:  http://<this-machine-ip>:5080"
-echo "    Import the .conf from wg-easy (http://192.168.50.148:51821) in the UI,"
+echo "    Import the .conf exported by the wg-easy server (192.168.50.148:51820) in the UI,"
 echo "    and the wg0 tunnel will be created automatically within ~15s."
 echo "    Check tunnel status:  docker exec wireguard-client wg show"
