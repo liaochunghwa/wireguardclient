@@ -29,11 +29,14 @@ echo "=== 2. host sysctls ==="
 [ "$(sysctl -n net.ipv4.ip_forward 2>/dev/null)" = "1" ] && pass "ip_forward=1" || warn "ip_forward=0"
 
 echo "=== 3. compose file ==="
-if grep -q '^\s*sysctls:' docker-compose.yml 2>/dev/null; then
-    fail "docker-compose.yml contains 'sysctls:' -> runc rejects it with network_mode: host"
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+COMPOSE_FILE="${COMPOSE_FILE:-$REPO_DIR/docker-compose.yml}"
+if grep -q '^[[:space:]]*sysctls:' "$COMPOSE_FILE" 2>/dev/null; then
+    fail "$COMPOSE_FILE contains 'sysctls:' -> runc rejects it with network_mode: host"
 else
     pass "no sysctls in compose (correct)"
-if grep -q 'network_mode: host' docker-compose.yml 2>/dev/null; then
+fi
+if grep -q 'network_mode: host' "$COMPOSE_FILE" 2>/dev/null; then
     pass "network_mode: host"
 else
     warn "no network_mode: host -> wg0 will not belong to the host"
