@@ -18,3 +18,7 @@ COPY custom-cont-init.d/ /custom-cont-init.d/
 
 # 3) Long-running helper services (DDNS endpoint refresh, route watchdog).
 COPY custom-services.d/ /custom-services.d/
+
+# custom-cont-init.d / custom-services.d scripts are only executed when they are
+# executable; git does not always carry the exec bit, so make sure of it here.
+RUN chmod +x /custom-cont-init.d/* /custom-services.d/* 2>/dev/null || true
