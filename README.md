@@ -87,7 +87,7 @@ EOF
 sudo sysctl -p /etc/sysctl.d/99-wireguard.conf
 ```
 
-> 這一步**不能**由 container 做：`network_mode: host` 下 kernel 拒绝容器改 `net.*` sysctl，runc 也禁止對 host namespace 傳 `--sysctl`。所以只能设在 host 層。
+> 這一步**不能**由 container 做：`network_mode: host` 下 kernel 拒絕容器改 `net.*` sysctl，runc 也禁止對 host namespace 傳 `--sysctl`。所以只能設定在 host 層。
 
 ## wg0.conf 設定說明
 
@@ -120,19 +120,19 @@ Endpoint = <SERVER_IP>:51820    # 同 LAN 用內網 IP，外網用域名
 
 **修正**：
 1. 自訂 `wireguard-client/svc-wireguard/run` 取代內建服務：**常駐監看** `wg_confs/`，conf 出現或內容改變時自動 `wg-quick down/up`，介面消失時自動重建（間隔 `WG_AUTO_UP_INTERVAL`，預設 15 秒）。
-2. ⚠️ **`docker-compose.yml` 不能寫 `sysctls:`**。`network_mode: host` 時網路 namespace 就是 host 的，runc 1.2+（實測 1.3.6）直接拒绝：
+2. ⚠️ **`docker-compose.yml` 不能寫 `sysctls:`**。`network_mode: host` 時網路 namespace 就是 host 的，runc 1.2+（實測 1.3.6）直接拒絕：
    ```
    failed to create shim task: OCI runtime create failed: runc create failed:
    sysctl "net.ipv4.conf.all.src_valid_mark" not allowed in host network namespace
    ```
-   結果是容器停在 `Created` 狀態、整個 stack 起不來，`docker restart` 也救不回来。sysctl 必須设在 **host 層**（`sudo ./deploy.sh` 寫 `/etc/sysctl.d/99-wireguard.conf`；`/etc/sysctl.conf` 裡被註解的 lines 不会生效）。container 內也無法設定（kernel 拒绝），watcher 只会 Warning。
+   結果是容器停在 `Created` 狀態、整個 stack 起不來，`docker restart` 也救不回來。sysctl 必須設定在 **host 層**（`sudo ./deploy.sh` 寫 `/etc/sysctl.d/99-wireguard.conf`；`/etc/sysctl.conf` 裡被註解的 lines 不會生效）。container 內也無法設定（kernel 拒絕），watcher 僅會 Warning。
 3. `wireguard-client/svc-wireguard/down` + `custom-cont-init.d/00-clean-orphan-ifaces.sh`：見下方「重啟後不套用」。
 4. Web UI 匯入時**驗證** conf（PrivateKey/PublicKey/Endpoint 是否真實）並**自動修正**：補 `ListenPort`、`PersistentKeepalive`，可選「只路由 VPN 子網」將 `AllowedIPs` 改為 `WG_VPN_SUBNET`。
 5. 套用設定時用 `docker exec` 執行 `wg-quick down/up`，不需要重啟整個 container。
 
 ### 重啟後不套用：孤兒 `wg0` 介面（最常見）
 
-`network_mode: host` 表示 **wg0 属于 host，不属于 container**。container 停止時若 down hook 沒成功（conf 解析失敗、`docker kill`、OOM），host 上的 wg0 還在，用的是**舊的私鑰與舊 ListenPort**。下一個 container 啟動時看到「wg0 已經 up」，就不重新套用 conf → 你改的設定永遠不會生效，看起来就是「重啟 docker 都失敗」。
+`network_mode: host` 表示 **wg0 屬於 host，不屬於 container**。container 停止時若 down hook 沒成功（conf 解析失敗、`docker kill`、OOM），host 上的 wg0 還在，用的是**舊的私鑰與舊 ListenPort**。下一個 container 啟動時看到「wg0 已經 up」，就不重新套用 conf → 你改的設定永遠不會生效，看起來就是「重啟 docker 都失敗」。
 
 修法（repo 已實作）：
 - 啟動時 `00-clean-orphan-ifaces.sh` 先把 host 上所有 `type wireguard` 的介面移除（同 host 有其他 WireGuard stack 時設 `WG_CLEAN_ORPHANS=0`）。
@@ -166,7 +166,7 @@ ip route show | grep 'dev wg0'           # 應有 10.8.0.0/24（及 192.168.50.0
 
 ## 每台主機的固定 ListenPort
 
-`WG_LISTEN_PORT` 是 UI 匯入 conf 時写進 `ListenPort` 的值，**必须與 WireGuard server 已學到的 listen port 一致**，否则重啟後 server 端的 endpoint 停在舊 port，handshake 不會完成。
+`WG_LISTEN_PORT` 是 UI 匯入 conf 時寫進 `ListenPort` 的值，**必須與 WireGuard server 已學到的 listen port 一致**，否則重啟後 server 端的 endpoint 停在舊 port，handshake 不會完成。
 
 | 主機 | `WG_LISTEN_PORT` | VPN IP |
 |------|-----------------|--------|
@@ -230,7 +230,7 @@ ip route show | grep default   # 確認出現 default via <GATEWAY>
 │   │   ├── run                     # 常駐 watcher：conf 出現/改變 → 自動 wg-quick down/up
 │   │   └── down                    # 容器停止時干净地拆除 wg0（避免孤兒介面）
 │   ├── custom-cont-init.d/
-│   │   └── 00-clean-orphan-ifaces.sh  # 啟動時移除 host 上残留的 wg 介面
+│   │   └── 00-clean-orphan-ifaces.sh  # 啟動時移除 host 上殘留的 wg 介面
 │   └── custom-services.d/
 │       └── 10-wg-dns-update.sh     # DDNS endpoint 輪轉時自動 `wg set peer endpoint`
 ├── wireguard-ui/
