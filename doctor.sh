@@ -14,11 +14,16 @@ fail() { echo "  [FAIL] $*"; }
 warn() { echo "  [warn] $*"; }
 
 echo "=== 1. containers ==="
-docker ps -a --format 'table {{.Name}}\t{{.State}}\t{{.Image}}' | grep -E 'wireguard|NAME'
-
+# `docker ps --format 'table {{.Name}}...'` is rejected by Docker 29.x on these
+# hosts ("failed to execute template"), so query each container by name.
 for c in "$CLIENT" wireguard-ui; do
-    state=$(docker inspect -f '{{ .State }}' "$c" 2>/dev/null || echo missing)
-    [ "$state" = "running" ] && pass "$c is running" || fail "$c state = $state"
+    if ! docker inspect "$c" >/dev/null 2>&1; then
+        fail "container $c does not exist (run sudo ./deploy.sh)"
+        continue
+    fi
+    state=$(docker inspect -f '{{ .State.Status }}' "$c" 2>/dev/null || echo missing)
+    image=$(docker inspect -f '{{ .Config.Image }}' "$c" 2>/dev/null)
+    [ "$state" = "running" ] && pass "$c is running ($image)" || fail "$c state = $state ($image)"
     if [ "$state" = "created" ]; then
         fail "$c is stuck in 'created' -> usually the compose file still has a 'sysctls:' block"
     fi
