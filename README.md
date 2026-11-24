@@ -153,6 +153,12 @@ sudo ./doctor.sh 192.168.50.148   # 檢查 container 狀態、sysctl、compose �
                                   # wg0、route、ping 到 Qdrant、watcher 最後 20 行 log
 ```
 
+驗證「重啟後隧道會自愈」（stop → start 後自動重建 wg0 並 ping Qdrant）：
+
+```bash
+sudo ./restart-test.sh 192.168.50.148
+```
+
 手動檢查：
 
 ```bash
@@ -182,7 +188,7 @@ sudo ./update.sh            # git pull + docker compose build --pull + up -d + t
 sudo ./update.sh --restart  # 只重啟 container，不重建 image
 ```
 
-想用 systemd timer 每天自動重建（含 linuxserver 基础 image 更新）：
+想用 systemd timer 每天自動重建（含 linuxserver 基礎 image 更新）：
 
 ```bash
 sudo cp systemd/wireguard-update.service systemd/wireguard-update.timer /etc/systemd/system/
@@ -217,7 +223,8 @@ ip route show | grep default   # 確認出現 default via <GATEWAY>
 ```
 ├── deploy.sh                       # 一鍵部署：host 前置檢查 + sysctl + 清理殘留 container + compose up
 ├── update.sh                       # git pull + rebuild image + 重啟（可挂 systemd timer 每日執行）
-├── doctor.sh                       # 一鍵自检：container/sysctl/wg0/route/ping/log
+├── doctor.sh                       # 一鍵自檢：container/sysctl/wg0/route/ping/log
+├── restart-test.sh                   # docker stop/start 後驗證隧道自動重建
 ├── docker-compose.yml              # 兩個 service 的 compose 設定（⚠️ 沒有 sysctls）
 ├── .env.example                    # 環境變數範本（複製為 .env）
 ├── systemd/
