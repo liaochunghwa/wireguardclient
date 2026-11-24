@@ -20,6 +20,7 @@
 #   - force re-applies whenever the state is missing or the conf changed,
 #   - reconciles routes from AllowedIPs (e.g. 192.168.50.0/24 -> Qdrant),
 #   - self-heals a tunnel that is up but has no handshake,
+#   - tears the interfaces down on SIGTERM so no orphan wg0 is left on the host,
 #   - retries forever instead of exiting.
 
 CONF_DIR="/config/wg_confs"
@@ -53,6 +54,26 @@ check_sysctls() {
 # /run/activeconfs is read by svc-wireguard/finish when the container stops.
 WG_CONFS=()
 write_active_confs() { declare -p WG_CONFS > "$ACTIVE_FILE"; }
+
+# Tear the tunnels down on SIGTERM. On this setup s6-rc did not reliably run
+# svc-wireguard/finish before the container was killed (verified on
+# 192.168.2.102: wg0 was still on the host after `docker stop wireguard-client`),
+# so the run script itself handles the shutdown. It is idempotent: if finish
+# also runs afterwards, the interfaces are already gone.
+teardown() {
+    log "shutting down: removing tunnel interfaces"
+    for conf in "${CONF_DIR}"/*.conf; do
+        [ -f "$conf" ] || continue
+        iface=$(iface_of "$conf")
+        if ip link show "$iface" >/dev/null 2>&1; then
+            wg-quick down "$conf" 2>/dev/null || true
+            ip link del dev "$iface" 2>/dev/null || true
+        fi
+    done
+    rm -f "$ACTIVE_FILE"
+    exit 0
+}
+trap teardown TERM INT
 
 # network_mode: host => wg0 is a host interface. Remove anything that a previous
 # container (or a crashed one) left behind before we bring the tunnels up, so
