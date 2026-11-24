@@ -37,8 +37,11 @@ def read_wg_conf():
 
 def write_wg_conf(content):
     os.makedirs(WG_CONF_DIR, exist_ok=True)
+    # Always end with a newline: without it, anything appended later (a hand
+    # edited PersistentKeepalive, a shell `echo >>`) gets glued to the last
+    # line and wg-quick fails with "Unrecognized service".
     with open(WG_CONF_FILE, 'w') as f:
-        f.write(content)
+        f.write(content.rstrip() + '\n')
 
 def restart_wireguard_client():
     try:

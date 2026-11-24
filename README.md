@@ -170,6 +170,16 @@ ip route show | grep default              # host 仍有 default route
 ip route show | grep 'dev wg0'           # 應有 10.8.0.0/24（及 192.168.50.0/24）
 ```
 
+### conf 結尾沒有 newline（手動 append 會毀掉 tunnel）
+
+UI 匯入/儲存出來的 `wg0.conf` 結尾不一定有 `\n`。这时 `echo "PersistentKeepalive = 30" >> wg0.conf` 會把新行黏在最後一行後面：
+
+```
+Unrecognized service: `mushinah.ddns.net:51820PersistentKeepalive=30'
+```
+
+tunnel 立刻斷線，且 watcher 每 cycle 重試都失敗。repo 已處理：UI 寫檔案時強制加 newline，watcher 啟動時也把缺 newline 的 conf 正規化（`normalize_confs`）。手動 edit 前先 `tail -c1 /config/wg_confs/wg0.conf` 確認。
+
 ## 每台主機的固定 ListenPort
 
 `WG_LISTEN_PORT` 是 UI 匯入 conf 時寫進 `ListenPort` 的值，**必須與 WireGuard server 已學到的 listen port 一致**，否則重啟後 server 端的 endpoint 停在舊 port，handshake 不會完成。

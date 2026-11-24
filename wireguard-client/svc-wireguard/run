@@ -175,8 +175,22 @@ ensure_tunnels() {
     done
 }
 
+# A conf without a trailing newline is a silent time bomb: the next thing
+# appended to it (a hand-edit, `echo >> ...`) gets glued onto the last line and
+# wg-quick then fails with "Unrecognized service". Normalise it once at start.
+normalize_confs() {
+    for conf in "${CONF_DIR}"/*.conf; do
+        [ -f "$conf" ] || continue
+        if [ -n "$(tail -c1 "$conf" 2>/dev/null)" ]; then
+            log "adding missing trailing newline to ${conf}"
+            echo >> "$conf"
+        fi
+    done
+}
+
 mkdir -p "$STATE_DIR"
 check_sysctls
+normalize_confs
 drop_orphan_interfaces
 log "watching ${CONF_DIR} (interval=${INTERVAL}s)"
 
