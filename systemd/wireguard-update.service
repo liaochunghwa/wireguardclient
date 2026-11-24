@@ -1,0 +1,15 @@
+# Rebuild the stack from the repo once a day so the linuxserver/wireguard base
+# image and the watcher scripts stay current.
+#
+# Install:
+#   sudo cp systemd/wireguard-update.service systemd/wireguard-update.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now wireguard-update.timer
+#   systemctl list-timers | grep wireguard
+[Unit]
+Description=Auto-update the WireGuard client stack (git pull + docker compose build)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/wireguardclient
+ExecStart=/opt/wireguardclient/update.sh

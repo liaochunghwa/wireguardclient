@@ -1,0 +1,20 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+# Clean shutdown: with network_mode: host the wg0 interface lives on the host,
+# so it must be removed on container stop; otherwise the next container start
+# finds an orphan wg0 built from the old keys/ListenPort and never re-applies
+# the conf from /config/wg_confs.
+
+CONF_DIR="/config/wg_confs"
+
+for conf in "${CONF_DIR}"/*.conf; do
+    [ -f "$conf" ] || continue
+    iface=$(basename "$conf" .conf)
+    if ip link show "$iface" >/dev/null 2>&1; then
+        echo "[wg-auto-up] disabling tunnel ${conf}"
+        wg-quick down "$conf" 2>/dev/null || true
+        ip link del dev "$iface" 2>/dev/null || true
+    fi
+done
+
+rm -f /run/activeconfs

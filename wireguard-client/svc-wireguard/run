@@ -1,59 +1,100 @@
 #!/usr/bin/with-contenv bash
 # shellcheck shell=bash
-# Replacement for the stock linuxserver svc-wireguard service.
+# Replacement for the stock svc-wireguard service.
 #
-# The stock service only tries `wg-quick up` ONCE at container start and then
-# exits. If the conf is missing/invalid at that moment (e.g. it is imported
-# later through the Web UI), the wg0 interface is never created on the host.
-# It also runs `ip route del default` when no conf is found, which with
-# network_mode: host deletes the HOST's default route.
+# Stock service problems (all of them show up as "restart docker and the
+# tunnel never comes back"):
+#   1. it runs `wg-quick up` ONCE at container start and then exits, so a conf
+#      imported later through the Web UI is never applied,
+#   2. when no conf exists it runs `ip route del default`, which with
+#      network_mode: host deletes the HOST's default route,
+#   3. with network_mode: host the wg0 interface belongs to the host, so a
+#      container that stopped without a clean `wg-quick down` leaves an orphan
+#      wg0. The next container sees "wg0 is up", skips the conf and the new
+#      keys / ListenPort are never applied.
 #
 # This version:
-#   1. ensures required sysctls are set (best effort),
-#   2. brings up every valid .conf in /config/wg_confs,
-#   3. keeps running forever: re-applies a tunnel when its conf changes,
-#      and re-brings-up any tunnel whose interface disappeared.
+#   - cleans orphan wg interfaces at start,
+#   - keeps the conf-hash state in the persistent /config volume, so a restart
+#     can tell whether the existing interface was built from the current conf,
+#   - force re-applies whenever the state is missing or the conf changed,
+#   - reconciles routes from AllowedIPs (e.g. 192.168.50.0/24 -> Qdrant),
+#   - self-heals a tunnel that is up but has no handshake,
+#   - retries forever instead of exiting.
 
 CONF_DIR="/config/wg_confs"
-STATE_DIR="/run/wg-state"
+STATE_DIR="${WG_STATE_DIR:-/config/.wg-state}"
 ACTIVE_FILE="/run/activeconfs"
 INTERVAL="${WG_AUTO_UP_INTERVAL:-15}"
+MAX_FAIL_CYCLES="${WG_MAX_FAIL_CYCLES:-4}"
 
-log() {
-    echo "[wg-auto-up] $*"
-}
+log() { echo "[wg-auto-up] $*"; }
 
 conf_valid() {
     grep -q '^\[Interface\]' "$1" && grep -q 'PrivateKey' "$1"
 }
 
-conf_hash() {
-    sha256sum "$1" | awk '{print $1}'
-}
+conf_hash() { sha256sum "$1" | awk '{print $1}'; }
 
-# wg-quick needs net.ipv4.conf.all.src_valid_mark=1 for routing. Try to set it
-# (needs CAP_SYS_ADMIN, hence SYS_ADMIN in docker-compose); if not permitted,
-# the host is expected to have it set already (deploy.sh / sysctl.conf).
-prepare_sysctls() {
-    sysctl -w net.ipv4.conf.all.src_valid_mark=1 2>/dev/null || \
-        log "could not set src_valid_mark from container; set it on the host"
+iface_of() { basename "$1" .conf; }
+
+# sysctl must be set on the HOST (deploy.sh writes /etc/sysctl.d/99-wireguard.conf).
+# Inside a container that shares the host network namespace the kernel refuses
+# to change net.* sysctls, so this is only a best-effort check.
+check_sysctls() {
+    if [ "$(sysctl -n net.ipv4.conf.all.src_valid_mark 2>/dev/null)" != "1" ]; then
+        log "WARNING: host sysctl net.ipv4.conf.all.src_valid_mark != 1."
+        log "  run: sudo sysctl -w net.ipv4.conf.all.src_valid_mark=1"
+        log "  and persist it in /etc/sysctl.d/99-wireguard.conf"
+    fi
     sysctl -w net.ipv4.ip_forward=1 2>/dev/null || true
 }
 
-# /run/activeconfs is read by the stock svc-wireguard "down" script on
-# container stop, so keep it in the format it expects.
+# /run/activeconfs is read by the stock svc-wireguard "down" script on stop.
 WG_CONFS=()
-write_active_confs() {
-    declare -p WG_CONFS > "$ACTIVE_FILE"
+write_active_confs() { declare -p WG_CONFS > "$ACTIVE_FILE"; }
+
+# network_mode: host => wg0 is a host interface. Remove anything that a previous
+# container (or a crashed one) left behind before we bring the tunnels up, so
+# the conf currently in /config/wg_confs is always the one in effect.
+drop_orphan_interfaces() {
+    for conf in "${CONF_DIR}"/*.conf; do
+        [ -f "$conf" ] || continue
+        iface=$(iface_of "$conf")
+        if ip link show "$iface" >/dev/null 2>&1; then
+            log "removing orphan interface ${iface} (left by a previous container)"
+            wg-quick down "$conf" 2>/dev/null || true
+            ip link del dev "$iface" 2>/dev/null || true
+        fi
+    done
+}
+
+# AllowedIPs are the routes wg-quick should install. If wg0 exists but the route
+# to the VPN subnet is missing (e.g. interface rebuilt by hand), add it back.
+ensure_routes() {
+    local conf="$1" iface="$2" ip
+    for ip in $(awk '/^[[:space:]]*AllowedIPs[[:space:]]*=/{print $NF}' "$conf" | tr ',' ' '); do
+        case "$ip" in
+            *:*) continue ;;   # skip IPv6
+        esac
+        if ! ip route show | grep -q "dev ${iface}"; then
+            log "adding missing route ${ip} dev ${iface}"
+            ip route add "$ip" dev "$iface" 2>/dev/null || true
+        fi
+    done
 }
 
 up_tunnel() {
     local conf="$1" iface
-    iface=$(basename "$conf" .conf)
+    iface=$(iface_of "$conf")
     log "bringing up interface ${iface} from ${conf}"
     if wg-quick up "$conf"; then
         conf_hash "$conf" > "${STATE_DIR}/${iface}.hash"
-        WG_CONFS+=("$conf")
+        if [ ! "${WG_CONFS[*]}" ]; then
+            WG_CONFS=("$conf")
+        else
+            WG_CONFS+=("$conf")
+        fi
         write_active_confs
         log "interface ${iface} is up"
         return 0
@@ -62,31 +103,60 @@ up_tunnel() {
     return 1
 }
 
+peer_connected() {
+    wg show "$1" 2>/dev/null | grep -q 'latest handshake'
+}
+
 ensure_tunnels() {
-    local conf iface hash prev
+    local conf iface hash prev fails
     for conf in "${CONF_DIR}"/*.conf; do
         [ -f "$conf" ] || continue
         if ! conf_valid "$conf"; then
             log "skipping invalid conf: ${conf}"
             continue
         fi
-        iface=$(basename "$conf" .conf)
+        iface=$(iface_of "$conf")
+        hash=$(conf_hash "$conf")
+        prev=$(cat "${STATE_DIR}/${iface}.hash" 2>/dev/null)
+
         if ! wg show "$iface" >/dev/null 2>&1; then
             up_tunnel "$conf"
-        else
-            hash=$(conf_hash "$conf")
-            prev=$(cat "${STATE_DIR}/${iface}.hash" 2>/dev/null)
-            if [ -n "$prev" ] && [ "$prev" != "$hash" ]; then
-                log "conf for ${iface} changed, re-applying"
+            continue
+        fi
+
+        # Interface exists but was not created from the conf currently on disk
+        # (orphan from an earlier container, or the conf was edited via the UI).
+        if [ "$prev" != "$hash" ]; then
+            log "conf for ${iface} changed (or interface is stale) -> re-applying"
+            wg-quick down "$conf" 2>/dev/null || true
+            ip link del dev "$iface" 2>/dev/null || true
+            up_tunnel "$conf"
+            continue
+        fi
+
+        ensure_routes "$conf" "$iface"
+
+        if ! peer_connected "$iface"; then
+            fails=$(cat "${STATE_DIR}/${iface}.fails" 2>/dev/null || echo 0)
+            fails=$((fails + 1))
+            echo "$fails" > "${STATE_DIR}/${iface}.fails"
+            log "${iface} is up but has no handshake (attempt ${fails})"
+            if [ "$MAX_FAIL_CYCLES" -gt 0 ] && [ "$fails" -ge "$MAX_FAIL_CYCLES" ]; then
+                log "recreating ${iface} interface"
                 wg-quick down "$conf" 2>/dev/null || true
+                ip link del dev "$iface" 2>/dev/null || true
+                echo 0 > "${STATE_DIR}/${iface}.fails"
                 up_tunnel "$conf"
             fi
+        else
+            echo 0 > "${STATE_DIR}/${iface}.fails"
         fi
     done
 }
 
 mkdir -p "$STATE_DIR"
-prepare_sysctls
+check_sysctls
+drop_orphan_interfaces
 log "watching ${CONF_DIR} (interval=${INTERVAL}s)"
 
 while true; do

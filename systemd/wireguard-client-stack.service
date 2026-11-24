@@ -1,0 +1,24 @@
+# Start the WireGuard client + UI stack at boot (equivalent to
+# `docker compose up -d` in the repo directory).
+#
+# Install:
+#   sudo cp systemd/wireguard-client-stack.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now wireguard-client-stack.service
+#
+# Set REPO_DIR to where the repo is checked out (e.g. /opt/wireguardclient).
+[Unit]
+Description=WireGuard client + Web UI (docker compose stack)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/wireguardclient
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

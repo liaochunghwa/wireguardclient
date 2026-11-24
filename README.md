@@ -44,9 +44,11 @@ sudo ./deploy.sh
 
 `deploy.sh` 會：
 1. 檢查 Docker 與 WireGuard kernel module
-2. 設定並持久化 `src_valid_mark` / `ip_forward` sysctl
-3. 從 `.env.example` 建立 `.env`（請修改 `ADMIN_PASS`、`SECRET_KEY`）
-4. `docker compose up -d --build`
+2. 寫 `/etc/sysctl.d/99-wireguard.conf`（`src_valid_mark` / `ip_forward`，重開機仍生效）
+3. 檢查 host 是否有 default route（沒有 → 提示 netplan 檔案）
+4. 移除「不是這個 compose 專案建立的」同名 container（避免 `docker run` 殘留造成 `docker compose up` 失敗）
+5. 從 `.env.example` 建立 `.env`（請修改 `ADMIN_PASS`、`SECRET_KEY`、`WG_LISTEN_PORT`）
+6. `docker compose up -d --build`，然後 tunnel 狀態檢查
 
 Web UI: `http://<YOUR_IP>:5080`
 
@@ -76,10 +78,16 @@ WireGuard client 的 `Endpoint` 需要根據部署環境選擇：
 sudo sysctl -w net.ipv4.conf.all.src_valid_mark=1
 sudo sysctl -w net.ipv4.ip_forward=1
 
-# 永久生效
-echo "net.ipv4.conf.all.src_valid_mark=1" | sudo tee -a /etc/sysctl.conf
-echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
+# 永久生效：用 drop-in 檔案（/etc/sysctl.conf 的預設內容全部被註解，
+# 直接 tee -a 到 /etc/sysctl.conf 容易被後面的註解行干擾，且有些系統不讀它）
+sudo tee /etc/sysctl.d/99-wireguard.conf >/dev/null <<'EOF'
+net.ipv4.conf.all.src_valid_mark = 1
+net.ipv4.ip_forward = 1
+EOF
+sudo sysctl -p /etc/sysctl.d/99-wireguard.conf
 ```
+
+> 這一步**不能**由 container 做：`network_mode: host` 下 kernel 拒绝容器改 `net.*` sysctl，runc 也禁止對 host namespace 傳 `--sysctl`。所以只能设在 host 層。
 
 ## wg0.conf 設定說明
 
@@ -112,11 +120,40 @@ Endpoint = <SERVER_IP>:51820    # 同 LAN 用內網 IP，外網用域名
 
 **修正**：
 1. 自訂 `wireguard-client/svc-wireguard/run` 取代內建服務：**常駐監看** `wg_confs/`，conf 出現或內容改變時自動 `wg-quick down/up`，介面消失時自動重建（間隔 `WG_AUTO_UP_INTERVAL`，預設 15 秒）。
-2. `docker-compose.yml` 加入 `SYS_ADMIN` 能力與 `sysctls`（`src_valid_mark`、`ip_forward`），container 可自行設定 wg-quick 所需參數。
-3. Web UI 匯入時**驗證** conf（PrivateKey/PublicKey/Endpoint 是否真實）並**自動修正**：補 `ListenPort`、`PersistentKeepalive`，可選「只路由 VPN 子網」將 `AllowedIPs` 改為 `WG_VPN_SUBNET`。
-4. 套用設定時用 `docker exec` 執行 `wg-quick down/up`，不需要重啟整個 container。
+2. ⚠️ **`docker-compose.yml` 不能寫 `sysctls:`**。`network_mode: host` 時網路 namespace 就是 host 的，runc 1.2+（實測 1.3.6）直接拒绝：
+   ```
+   failed to create shim task: OCI runtime create failed: runc create failed:
+   sysctl "net.ipv4.conf.all.src_valid_mark" not allowed in host network namespace
+   ```
+   結果是容器停在 `Created` 狀態、整個 stack 起不來，`docker restart` 也救不回来。sysctl 必須设在 **host 層**（`sudo ./deploy.sh` 寫 `/etc/sysctl.d/99-wireguard.conf`；`/etc/sysctl.conf` 裡被註解的 lines 不会生效）。container 內也無法設定（kernel 拒绝），watcher 只会 Warning。
+3. `wireguard-client/svc-wireguard/down` + `custom-cont-init.d/00-clean-orphan-ifaces.sh`：見下方「重啟後不套用」。
+4. Web UI 匯入時**驗證** conf（PrivateKey/PublicKey/Endpoint 是否真實）並**自動修正**：補 `ListenPort`、`PersistentKeepalive`，可選「只路由 VPN 子網」將 `AllowedIPs` 改為 `WG_VPN_SUBNET`。
+5. 套用設定時用 `docker exec` 執行 `wg-quick down/up`，不需要重啟整個 container。
 
-### 快速排查
+### 重啟後不套用：孤兒 `wg0` 介面（最常見）
+
+`network_mode: host` 表示 **wg0 属于 host，不属于 container**。container 停止時若 down hook 沒成功（conf 解析失敗、`docker kill`、OOM），host 上的 wg0 還在，用的是**舊的私鑰與舊 ListenPort**。下一個 container 啟動時看到「wg0 已經 up」，就不重新套用 conf → 你改的設定永遠不會生效，看起来就是「重啟 docker 都失敗」。
+
+修法（repo 已實作）：
+- 啟動時 `00-clean-orphan-ifaces.sh` 先把 host 上所有 `type wireguard` 的介面移除（同 host 有其他 WireGuard stack 時設 `WG_CLEAN_ORPHANS=0`）。
+- conf 的 hash 存在 **持久 volume** `${DATA_DIR}/.wg-state/`，所以重啟後能判断「现有介面是不是由目前 conf 建立」。hash 不符或 state 空 → 強制 `wg-quick down` + `ip link del` + 重新 `up`。
+- 每 cycle 檢查 `AllowedIPs` 的 route 是否存在，缺了就補（例如 `192.168.50.0/24` 到 Qdrant）。
+- tunnel up 但沒有 handshake，連續 `WG_MAX_FAIL_CYCLES`（預設 4）次後自動重建介面。
+
+判斷方式：
+```bash
+docker stop wireguard-client
+ip link show wg0          # 如果仍存在 → 就是孤兒介面問題
+```
+
+### 快速排查（一鍵）
+
+```bash
+sudo ./doctor.sh 192.168.50.148   # 檢查 container 狀態、sysctl、compose 是否有 sysctls、
+                                  # wg0、route、ping 到 Qdrant、watcher 最後 20 行 log
+```
+
+手動檢查：
 
 ```bash
 docker logs wireguard-client              # 看 [wg-auto-up] 是否 bringing up / failed
@@ -124,6 +161,42 @@ docker exec wireguard-client wg show      # 是否有 wg0 與 handshake
 docker exec wireguard-client cat /config/wg_confs/wg0.conf
 sysctl net.ipv4.conf.all.src_valid_mark   # 應為 1
 ip route show | grep default              # host 仍有 default route
+ip route show | grep 'dev wg0'           # 應有 10.8.0.0/24（及 192.168.50.0/24）
+```
+
+## 每台主機的固定 ListenPort
+
+`WG_LISTEN_PORT` 是 UI 匯入 conf 時写進 `ListenPort` 的值，**必须與 WireGuard server 已學到的 listen port 一致**，否则重啟後 server 端的 endpoint 停在舊 port，handshake 不會完成。
+
+| 主機 | `WG_LISTEN_PORT` | VPN IP |
+|------|-----------------|--------|
+| 192.168.2.2（amhs-web01） | 52066 | 10.8.0.27 |
+| 192.168.2.102（amhs-web02） | 52067 | 10.8.0.28 |
+
+查目前值：`docker exec wireguard-client wg show` → `listening port`。
+
+## 自動更新（image 與 watcher 保持最新）
+
+```bash
+sudo ./update.sh            # git pull + docker compose build --pull + up -d + tunnel 檢查
+sudo ./update.sh --restart  # 只重啟 container，不重建 image
+```
+
+想用 systemd timer 每天自動重建（含 linuxserver 基础 image 更新）：
+
+```bash
+sudo cp systemd/wireguard-update.service systemd/wireguard-update.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now wireguard-update.timer
+systemctl list-timers | grep wireguard
+```
+
+開機自動啟動整個 stack：
+
+```bash
+sudo cp systemd/wireguard-client-stack.service /etc/systemd/system/   # 改掉 WorkingDirectory 路徑
+sudo systemctl daemon-reload
+sudo systemctl enable --now wireguard-client-stack.service
 ```
 
 ## 預設路由保險（netplan）
@@ -142,15 +215,26 @@ ip route show | grep default   # 確認出現 default via <GATEWAY>
 ## Files
 
 ```
-├── deploy.sh                       # 一鍵部署：host 前置檢查 + sysctl + compose up
-├── docker-compose.yml              # 兩個 service 的 compose 設定
+├── deploy.sh                       # 一鍵部署：host 前置檢查 + sysctl + 清理殘留 container + compose up
+├── update.sh                       # git pull + rebuild image + 重啟（可挂 systemd timer 每日執行）
+├── doctor.sh                       # 一鍵自检：container/sysctl/wg0/route/ping/log
+├── docker-compose.yml              # 兩個 service 的 compose 設定（⚠️ 沒有 sysctls）
 ├── .env.example                    # 環境變數範本（複製為 .env）
+├── systemd/
+│   ├── wireguard-client-stack.service   # 開機自動 docker compose up -d
+│   ├── wireguard-update.service
+│   └── wireguard-update.timer           # 每日 04:30 自動 rebuild
 ├── wireguard-client/
-│   ├── Dockerfile                  # 基於 linuxserver/wireguard，覆寫 svc-wireguard
-│   └── svc-wireguard/
-│       └── run                     # 常駐 watcher：conf 出現/改變 → 自動 wg-quick up/down
+│   ├── Dockerfile                  # 基於 linuxserver/wireguard，覆寫 svc-wireguard run/down
+│   ├── svc-wireguard/
+│   │   ├── run                     # 常駐 watcher：conf 出現/改變 → 自動 wg-quick down/up
+│   │   └── down                    # 容器停止時干净地拆除 wg0（避免孤兒介面）
+│   ├── custom-cont-init.d/
+│   │   └── 00-clean-orphan-ifaces.sh  # 啟動時移除 host 上残留的 wg 介面
+│   └── custom-services.d/
+│       └── 10-wg-dns-update.sh     # DDNS endpoint 輪轉時自動 `wg set peer endpoint`
 ├── wireguard-ui/
-│   ├── app.py                      # Flask 主程式
+│   ├── app.py                      # Flask 主程式（匯入驗證 + 自動補 ListenPort/AllowedIPs）
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── templates/

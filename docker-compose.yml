@@ -1,17 +1,24 @@
+# WireGuard client + Web UI
+#
+# ⚠️ 不要在这里写 sysctls。
+#   runc 1.2+（實測 1.3.6）禁止對「host network namespace」設定 net.* sysctl，
+#   而 wireguard-client 必須用 network_mode: host 才能讓 wg0 属于 host：
+#     failed to create shim task: OCI runtime create failed: runc create failed:
+#     sysctl "net.ipv4.conf.all.src_valid_mark" not allowed in host network namespace
+#   → 容器停在 Created 狀態，整個 stack 起不來（docker restart 也救不回来）。
+#   解法：sysctl 设在 host 層，sudo ./deploy.sh 會寫 /etc/sysctl.d/99-wireguard.conf
+#   （/etc/sysctl.conf 被註解的設定不会生效，必須用 drop-in 檔案）。
 services:
   wireguard-client:
     build: ./wireguard-client
+    image: wireguardclient-wireguard-client:latest
     container_name: wireguard-client
     network_mode: host
     cap_add:
       - NET_ADMIN
-      - SYS_MODULE
-      - SYS_ADMIN
+      - SYS_MODULE          # 只有 host 未載入 wireguard module 时才需要
     devices:
       - /dev/net/tun:/dev/net/tun
-    sysctls:
-      - net.ipv4.conf.all.src_valid_mark=1
-      - net.ipv4.ip_forward=1
     volumes:
       - ${DATA_DIR:-./data}:/config
     environment:
@@ -20,11 +27,17 @@ services:
       - PUID=0
       - PGID=0
       - TZ=${TZ:-Asia/Taipei}
+      # 監看 wg_confs 的間隔（秒）：conf 改變 → 自動 down/up（auto apply）
       - WG_AUTO_UP_INTERVAL=${WG_AUTO_UP_INTERVAL:-15}
+      # DDNS endpoint 自動刷新間隔（秒）
+      - WG_DNS_INTERVAL=${WG_DNS_INTERVAL:-60}
+      # tunnel 沒有 handshake 時，多少個 cycle 后自動重建介面（0 = 不重建）
+      - WG_MAX_FAIL_CYCLES=${WG_MAX_FAIL_CYCLES:-4}
     restart: unless-stopped
 
   wireguard-ui:
     build: ./wireguard-ui
+    image: wireguardclient-wireguard-ui:latest
     container_name: wireguard-ui
     network_mode: host
     cap_add:
@@ -39,6 +52,7 @@ services:
       - SECRET_KEY=${SECRET_KEY:-wg-ui-2026}
       - WG_UI_PORT=${WG_UI_PORT:-5080}
       - WG_CLIENT_CONTAINER=wireguard-client
+      # 每台機器一個固定值（必須與 server 已學到的 listen port 一致）
       - WG_LISTEN_PORT=${WG_LISTEN_PORT:-51821}
       - WG_VPN_SUBNET=${WG_VPN_SUBNET:-10.8.0.0/24}
     depends_on:
