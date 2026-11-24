@@ -70,7 +70,7 @@ remove_stale_containers() {
             continue
         fi
         cfg=$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$name" 2>/dev/null || true)
-        state=$(docker inspect -f '{{ .State }}' "$name" 2>/dev/null || true)
+        state=$(docker inspect -f '{{ .State.Status }}' "$name" 2>/dev/null || true)
         if [ "$cfg" != "$COMPOSE_FILE" ] || [ "$state" = "created" ]; then
             echo "==> Removing stale container ${name} (compose file: ${cfg:-<none>}, state: ${state})"
             docker rm -f "$name" >/dev/null

@@ -234,6 +234,7 @@ ip route show | grep default   # 確認出現 default via <GATEWAY>
 ├── wireguard-client/
 │   ├── Dockerfile                  # 基於 linuxserver/wireguard，覆寫 svc-wireguard run/finish
 │   ├── svc-wireguard/
+│   │   ├── type                    # longrun（內建是 oneshot → docker stop 會 SIGKILL，finish 不執行）
 │   │   ├── run                     # 常駐 watcher：conf 出現/改變 → 自動 wg-quick down/up
 │   │   └── finish                  # 容器停止時乾淨地拆除 wg0（避免孤兒介面）
 │   ├── custom-cont-init.d/
