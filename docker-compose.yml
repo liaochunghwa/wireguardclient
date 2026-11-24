@@ -31,8 +31,10 @@ services:
       - WG_AUTO_UP_INTERVAL=${WG_AUTO_UP_INTERVAL:-15}
       # DDNS endpoint 自動刷新間隔（秒）
       - WG_DNS_INTERVAL=${WG_DNS_INTERVAL:-60}
-      # tunnel 沒有 handshake 時，多少個 cycle 后自動重建介面（0 = 不重建）
+      # tunnel 沒有 handshake 時，多少個 cycle 後自動重建介面（0 = 不重建）
       - WG_MAX_FAIL_CYCLES=${WG_MAX_FAIL_CYCLES:-4}
+      # 啟動時移除 host 上殘留的 wg 介面（1 = 開，0 = 不动，適合同一 host 上有其他 wg stack）
+      - WG_CLEAN_ORPHANS=${WG_CLEAN_ORPHANS:-1}
     restart: unless-stopped
 
   wireguard-ui:
