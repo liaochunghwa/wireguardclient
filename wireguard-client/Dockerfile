@@ -8,6 +8,12 @@ COPY svc-wireguard/run /etc/s6-overlay/s6-rc.d/svc-wireguard/run
 # s6-rc calls `finish` (not `down`) when the service stops; the stock finish
 # script tears down the tunnels listed in /run/activeconfs.
 COPY svc-wireguard/finish /etc/s6-overlay/s6-rc.d/svc-wireguard/finish
+# The stock service is type `oneshot`, so s6 never supervises the run script and
+# `docker stop` kills it with SIGKILL: the teardown (finish / the TERM trap in
+# run) never runs and wg0 stays on the host. Declaring it `longrun` makes s6
+# stop it gracefully, run finish, and let the TERM trap in run tear the tunnel
+# down.
+COPY svc-wireguard/type /etc/s6-overlay/s6-rc.d/svc-wireguard/type
 RUN chmod +x /etc/s6-overlay/s6-rc.d/svc-wireguard/run \
              /etc/s6-overlay/s6-rc.d/svc-wireguard/finish
 
