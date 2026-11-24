@@ -10,14 +10,13 @@
 # Set WG_CLEAN_ORPHANS=0 in .env if another WireGuard stack on the same host
 # must not be touched.
 
-INTERVAL=10
-
 if [ "${WG_CLEAN_ORPHANS:-1}" = "0" ]; then
     echo "[clean-orphan] disabled (WG_CLEAN_ORPHANS=0)"
     exit 0
 fi
 
-for iface in $(ip -o link show type wireguard 2>/dev/null | awk -F': ' '{print $1}'); do
+# `ip -o link show type wireguard` prints "33: wg0: <POINTOPOINT,...>"
+for iface in $(ip -o link show type wireguard 2>/dev/null | sed -n 's/^[0-9]*: \([^:]*\):.*/\1/p'); do
     conf="/config/wg_confs/${iface}.conf"
     echo "[clean-orphan] removing interface ${iface}"
     if [ -f "$conf" ]; then
