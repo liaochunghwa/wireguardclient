@@ -50,7 +50,7 @@ check_sysctls() {
     sysctl -w net.ipv4.ip_forward=1 2>/dev/null || true
 }
 
-# /run/activeconfs is read by the stock svc-wireguard "down" script on stop.
+# /run/activeconfs is read by svc-wireguard/finish when the container stops.
 WG_CONFS=()
 write_active_confs() { declare -p WG_CONFS > "$ACTIVE_FILE"; }
 

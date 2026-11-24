@@ -5,9 +5,11 @@ FROM linuxserver/wireguard:latest
 #    default route with network_mode: host) with a persistent watcher that
 #    (re)deploys every tunnel in /config/wg_confs.
 COPY svc-wireguard/run /etc/s6-overlay/s6-rc.d/svc-wireguard/run
-COPY svc-wireguard/down /etc/s6-overlay/s6-rc.d/svc-wireguard/down
+# s6-rc calls `finish` (not `down`) when the service stops; the stock finish
+# script tears down the tunnels listed in /run/activeconfs.
+COPY svc-wireguard/finish /etc/s6-overlay/s6-rc.d/svc-wireguard/finish
 RUN chmod +x /etc/s6-overlay/s6-rc.d/svc-wireguard/run \
-            /etc/s6-overlay/s6-rc.d/svc-wireguard/down
+             /etc/s6-overlay/s6-rc.d/svc-wireguard/finish
 
 # 2) Remove interfaces left behind by a previous container. With
 #    network_mode: host, wg0 belongs to the HOST, so `docker stop` that fails

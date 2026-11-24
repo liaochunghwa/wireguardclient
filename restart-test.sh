@@ -22,7 +22,8 @@ echo "=== docker start wireguard-client ==="
 docker start wireguard-client
 for i in $(seq 1 12); do
     sleep 5
-    if wg show wg0 >/dev/null 2>&1 && ip route show | grep -q 'dev wg0'; then
+    if docker exec wireguard-client wg show wg0 >/dev/null 2>&1 && ip route show | grep -q 'dev wg0'; then
+        echo "  tunnel back after $((i*5))s"
         break
     fi
     echo "  waiting... ($i)"

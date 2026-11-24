@@ -126,7 +126,7 @@ Endpoint = <SERVER_IP>:51820    # 同 LAN 用內網 IP，外網用域名
    sysctl "net.ipv4.conf.all.src_valid_mark" not allowed in host network namespace
    ```
    結果是容器停在 `Created` 狀態、整個 stack 起不來，`docker restart` 也救不回來。sysctl 必須設定在 **host 層**（`sudo ./deploy.sh` 寫 `/etc/sysctl.d/99-wireguard.conf`；`/etc/sysctl.conf` 裡被註解的 lines 不會生效）。container 內也無法設定（kernel 拒絕），watcher 僅會 Warning。
-3. `wireguard-client/svc-wireguard/down` + `custom-cont-init.d/00-clean-orphan-ifaces.sh`：見下方「重啟後不套用」。
+3. `wireguard-client/svc-wireguard/finish`（s6-rc 停止服務時執行）+ `custom-cont-init.d/00-clean-orphan-ifaces.sh`：見下方「重啟後不套用」。
 4. Web UI 匯入時**驗證** conf（PrivateKey/PublicKey/Endpoint 是否真實）並**自動修正**：補 `ListenPort`、`PersistentKeepalive`，可選「只路由 VPN 子網」將 `AllowedIPs` 改為 `WG_VPN_SUBNET`。
 5. 套用設定時用 `docker exec` 執行 `wg-quick down/up`，不需要重啟整個 container。
 
@@ -136,7 +136,7 @@ Endpoint = <SERVER_IP>:51820    # 同 LAN 用內網 IP，外網用域名
 
 修法（repo 已實作）：
 - 啟動時 `00-clean-orphan-ifaces.sh` 先把 host 上所有 `type wireguard` 的介面移除（同 host 有其他 WireGuard stack 時設 `WG_CLEAN_ORPHANS=0`）。
-- conf 的 hash 存在 **持久 volume** `${DATA_DIR}/.wg-state/`，所以重啟後能判断「现有介面是不是由目前 conf 建立」。hash 不符或 state 空 → 強制 `wg-quick down` + `ip link del` + 重新 `up`。
+- conf 的 hash 存在 **持久 volume** `${DATA_DIR}/.wg-state/`，所以重啟後能判斷「現有介面是不是由目前 conf 建立」。hash 不符或 state 空 → 強制 `wg-quick down` + `ip link del` + 重新 `up`。
 - 每 cycle 檢查 `AllowedIPs` 的 route 是否存在，缺了就補（例如 `192.168.50.0/24` 到 Qdrant）。
 - tunnel up 但沒有 handshake，連續 `WG_MAX_FAIL_CYCLES`（預設 4）次後自動重建介面。
 
@@ -225,10 +225,10 @@ ip route show | grep default   # 確認出現 default via <GATEWAY>
 │   ├── wireguard-update.service
 │   └── wireguard-update.timer           # 每日 04:30 自動 rebuild
 ├── wireguard-client/
-│   ├── Dockerfile                  # 基於 linuxserver/wireguard，覆寫 svc-wireguard run/down
+│   ├── Dockerfile                  # 基於 linuxserver/wireguard，覆寫 svc-wireguard run/finish
 │   ├── svc-wireguard/
 │   │   ├── run                     # 常駐 watcher：conf 出現/改變 → 自動 wg-quick down/up
-│   │   └── down                    # 容器停止時干净地拆除 wg0（避免孤兒介面）
+│   │   └── finish                  # 容器停止時乾淨地拆除 wg0（避免孤兒介面）
 │   ├── custom-cont-init.d/
 │   │   └── 00-clean-orphan-ifaces.sh  # 啟動時移除 host 上殘留的 wg 介面
 │   └── custom-services.d/
