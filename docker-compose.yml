@@ -12,6 +12,7 @@ services:
   wireguard-client:
     build: ./wireguard-client
     image: wireguardclient-wireguard-client:latest
+    pull_policy: never
     container_name: wireguard-client
     network_mode: host
     cap_add:
@@ -40,6 +41,7 @@ services:
   wireguard-ui:
     build: ./wireguard-ui
     image: wireguardclient-wireguard-ui:latest
+    pull_policy: never
     container_name: wireguard-ui
     network_mode: host
     cap_add:
